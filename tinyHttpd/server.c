@@ -5,12 +5,20 @@
 #include <netinet/in.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <ctype.h>
+
+#define ISspace(x) isspace((int)x)
 
 void usage(char**);
 void build_server(const char*);
 void socket_error_exit(const char*);
 void* accept_request(void*);
 int get_line(int, char*, int);
+void not_found(int);
+void execute_cgi(int, const char*, const char*, const char*);
+void serve_file(int, const char*);
 
 int main(int argc, char* argv[]) {
     if (argc == 1) {
@@ -90,7 +98,76 @@ void usage(char* argv[]) {
 }
 
 void* accept_request(void* arg) {
-    // TODO
+    int client = (intptr_t)arg;
+    char buf[1024];
+    char method[255]; // POST or GET
+    char url[255]; 
+    char path[255];
+    size_t numchars;
+    size_t i = 0, j = 0;
+    int cgi = 0; // flag for executing cgi file
+    char* query_string = NULL; // used to get content after "?" in GET method
+    struct stat st;
+
+    // read first line of request header
+    numchars = get_line(client, buf, sizeof(buf));
+    // get method name: POST or GET
+    while (i < numchars && !ISspace(buf[i]) && j < sizeof(method)) {
+        method[j++] = buf[i++];
+    }
+    method[j] = '\0';
+
+    if (strcasecmp(method, "POST") == 0) {
+        cgi = 1;
+    }
+
+    // skip space between method and url
+    while (i < numchars && ISspace(buf[i]))
+        i++;
+    // get url
+    j = 0;
+    while (i < numchars && !ISspace(buf[i]) && j < sizeof(url)) {
+        url[j++] = buf[i++];
+    }
+    url[j] = '\0';
+
+    // get query_string
+    if (strcasecmp(method, "GET") == 0) {
+        query_string = url;
+        while (*query_string != '?' && *query_string != '\0')
+            query_string++;
+        if (*query_string == '?') {
+            cgi = 1; // need to execute cgi file
+            *query_string = '\0'; // now url will not contain '?'
+            query_string++;
+        }
+    }
+
+    sprintf(path, "htdocs%s", url);
+
+    // if path is a directory, the set dafault page: index.html
+    if (path[strlen(path)-1] == '/')
+        strcat(path, "index.html");
+    // int stat(const char *file_name, struct stat *buf)
+    // access file infomation specified by file_name, saved in struct stat
+    if (stat(path, &st) == -1) {
+        while ((numchars > 0) && strcmp("\n", buf))  /* read & discard headers */
+            numchars = get_line(client, buf, sizeof(buf));
+        // page not exist
+        not_found(client);
+    } else {
+        if ((st.st_mode & S_IFMT) == S_IFDIR)
+            strcat(path, "/index.html");
+        if ((st.st_mode & S_IXUSR) || (st.st_mode & S_IXGRP) || (st.st_mode & S_IXOTH)) 
+            cgi = 1;
+        if (cgi) {
+            execute_cgi(client, path, method, query_string);
+        } else {
+            serve_file(client, path);
+        }
+    }
+
+    close(client);
     return (void*)0;
 }
 
@@ -120,4 +197,16 @@ int get_line(int sock, char* buf, int size) {
     }
     buf[nbytes] = '\n';
     return nbytes;
+}
+
+void not_found(int client) {
+    // TODO
+}
+
+void execute_cgi(int client, const char* path, const char* method, const char* query_string) {
+    // TODO
+}
+
+void serve_file(int client, const char* path) {
+    // TODO
 }
