@@ -6,10 +6,11 @@
 #include <string.h>
 #include <unistd.h>
 
-void usage(char* argv[]);
+void usage(char**);
 void build_server(const char*);
 void socket_error_exit(const char*);
-void* accept_request(void* arg);
+void* accept_request(void*);
+int get_line(int, char*, int);
 
 int main(int argc, char* argv[]) {
     if (argc == 1) {
@@ -89,5 +90,34 @@ void usage(char* argv[]) {
 }
 
 void* accept_request(void* arg) {
+    // TODO
     return (void*)0;
+}
+
+// no matter a line of header ends at '\r', '\n', or '\r\n'
+// substitute the end line to '\n'
+int get_line(int sock, char* buf, int size) {
+    int nbytes = 0;
+    char single_buf[1]; // used for receive one character
+    int n;
+
+    while (nbytes < size - 1 && single_buf[0] != '\n') {
+        n = recv(sock, single_buf, 1, 0);
+        if (n > 0) {
+            if (single_buf[0] == '\r') {
+                // When we specify the MSG_PEEK flag, 
+                // we can peek at the next data to be read without actually consuming it.
+                n = recv(sock, single_buf, 1, MSG_PEEK);
+                if (n > 0 && single_buf[0] == '\n') 
+                    n = recv(sock, single_buf, 1, 0);
+                else 
+                    single_buf[0] = '\n'; 
+            }
+            buf[nbytes++] = single_buf[0];
+        } else {
+            single_buf[0] = '\n';
+        }
+    }
+    buf[nbytes] = '\n';
+    return nbytes;
 }
