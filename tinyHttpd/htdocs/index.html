@@ -1,0 +1,35 @@
+<html>
+    <head>
+        <title>register</title>
+        <meta charset="utf-8">
+    </head>
+    <body>
+        <form action="register.cgi" method="POST">
+            account: <input type="text" name="account" value="" size="10" maxlength="5">
+            <br>
+            <br>
+            password: <input type="password" value="" name="password" size="10">
+            <br>
+            <br>
+            gender: <input type="radio" name="sex" checked="checked">男<input type="radio" name="sex">女
+            <br>
+            <br>
+            introduction: <br>
+            <textarea cols="35" rows="10" name="introduction">
+                input introduction
+            </textarea>
+            <br>
+            <br>
+            age:
+            <select name="age">
+                <option value="18">18</option>
+                <option value="19">19</option>
+                <option value="20">20</option>
+            </select>
+            <br>
+            <br>
+            <input type="submit" value="submit">
+            <input type="reset" value="reset">
+        </form>
+    </body>
+</html>

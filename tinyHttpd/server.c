@@ -10,6 +10,8 @@
 #include <ctype.h>
 
 #define ISspace(x) isspace((int)x)
+#define BUF_SIZE 1024
+#define SERVER_NAME "test_for_tinyhttpd"
 
 void usage(char**);
 void build_server(const char*);
@@ -19,6 +21,8 @@ int get_line(int, char*, int);
 void not_found(int);
 void execute_cgi(int, const char*, const char*, const char*);
 void serve_file(int, const char*);
+void send_response_headers(int);
+void send_response_body(int, FILE*);
 
 int main(int argc, char* argv[]) {
     if (argc == 1) {
@@ -99,7 +103,7 @@ void usage(char* argv[]) {
 
 void* accept_request(void* arg) {
     int client = (intptr_t)arg;
-    char buf[1024];
+    char buf[BUF_SIZE];
     char method[255]; // POST or GET
     char url[255]; 
     char path[255];
@@ -199,14 +203,71 @@ int get_line(int sock, char* buf, int size) {
     return nbytes;
 }
 
+// response for 404 not found
 void not_found(int client) {
-    // TODO
+    char buf[BUF_SIZE];
+
+    sprintf(buf, "HTTP/1.0 404 NOT FOUND\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "SERVER: %s\r\n", SERVER_NAME);
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "Content-Type: text/html\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "<HTML><TITLE>Not Found</TITLE>\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "<BODY><P>404 NOT FOUND\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "</BODY></HTML>\r\n");
+    send(client, buf, strlen(buf), 0);
 }
 
 void execute_cgi(int client, const char* path, const char* method, const char* query_string) {
     // TODO
 }
 
+// present a static file
 void serve_file(int client, const char* path) {
-    // TODO
+    FILE* resource;
+    char buf[BUF_SIZE];
+    int nbytes = 1;
+
+    // read and discard
+    buf[0] = 'A'; buf[1] = '\n'; // avoid passing a NULL parameter to strcmp function
+    while (nbytes > 0 && strcmp(buf, "\n")) 
+        nbytes = get_line(client, buf, sizeof(buf));
+
+    resource = fopen(path, "r");
+    if (resource == NULL) {
+        not_found(client);
+    } else {
+        send_response_headers(client);
+        send_response_body(client, resource);
+    }
+
+    fclose(resource);
+}
+
+void send_response_body(int client, FILE* resource) {
+    char buf[BUF_SIZE];
+
+    while (1) {
+        if (fgets(buf, sizeof(buf), resource) == NULL)
+            break;
+        send(client, buf, strlen(buf), 0);
+    }
+}
+
+void send_response_headers(int client) {
+    char buf[BUF_SIZE];
+
+    sprintf(buf, "HTTP/1.1 200 OK\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "SERVER: %s\r\n", SERVER_NAME);
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "Content-Type: text/html\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "\r\n");
+    send(client, buf, strlen(buf), 0);
 }
