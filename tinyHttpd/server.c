@@ -12,6 +12,8 @@
 #define ISspace(x) isspace((int)x)
 #define BUF_SIZE 1024
 #define SERVER_NAME "test_for_tinyhttpd"
+#define STDIN 0
+#define STDOUT 1
 
 void usage(char**);
 void build_server(const char*);
@@ -123,6 +125,8 @@ void* accept_request(void* arg) {
     }
     method[j] = '\0';
 
+    printf("method=%s", method);
+
     if (strcasecmp(method, "POST") == 0) {
         cgi = 1;
     }
@@ -136,6 +140,7 @@ void* accept_request(void* arg) {
         url[j++] = buf[i++];
     }
     url[j] = '\0';
+    printf("url=%s", url);
 
     // get query_string
     if (strcasecmp(method, "GET") == 0) {
@@ -150,6 +155,7 @@ void* accept_request(void* arg) {
     }
 
     sprintf(path, "htdocs%s", url);
+    printf("path=%s", path);
 
     // if path is a directory, the set dafault page: index.html
     if (path[strlen(path)-1] == '/')
@@ -162,11 +168,13 @@ void* accept_request(void* arg) {
         // page not exist
         not_found(client);
     } else {
+        printf("test cgi file mode");
         if ((st.st_mode & S_IFMT) == S_IFDIR)
             strcat(path, "/index.html");
         if ((st.st_mode & S_IXUSR) || (st.st_mode & S_IXGRP) || (st.st_mode & S_IXOTH)) 
             cgi = 1;
-        if (cgi) {
+        printf("cgi file can execute");
+        if (cgi > 0) {
             execute_cgi(client, path, method, query_string);
         } else {
             serve_file(client, path);
@@ -181,27 +189,27 @@ void* accept_request(void* arg) {
 // substitute the end line to '\n'
 int get_line(int sock, char* buf, int size) {
     int nbytes = 0;
-    char single_buf[1]; // used for receive one character
+    char single_buf = '\0'; // used for receive one character
     int n;
 
-    while (nbytes < size - 1 && single_buf[0] != '\n') {
-        n = recv(sock, single_buf, 1, 0);
+    while (nbytes < size - 1 && single_buf != '\n') {
+        n = recv(sock, &single_buf, 1, 0);
         if (n > 0) {
-            if (single_buf[0] == '\r') {
+            if (single_buf == '\r') {
                 // When we specify the MSG_PEEK flag, 
                 // we can peek at the next data to be read without actually consuming it.
-                n = recv(sock, single_buf, 1, MSG_PEEK);
-                if (n > 0 && single_buf[0] == '\n') 
-                    n = recv(sock, single_buf, 1, 0);
+                n = recv(sock, &single_buf, 1, MSG_PEEK);
+                if (n > 0 && single_buf == '\n') 
+                    n = recv(sock, &single_buf, 1, 0);
                 else 
-                    single_buf[0] = '\n'; 
+                    single_buf = '\n'; 
             }
-            buf[nbytes++] = single_buf[0];
+            buf[nbytes++] = single_buf;
         } else {
-            single_buf[0] = '\n';
+            single_buf = '\n';
         }
     }
-    buf[nbytes] = '\n';
+    buf[nbytes] = '\0'; // end of line
     return nbytes;
 }
 
@@ -232,26 +240,31 @@ void execute_cgi(int client, const char* path, const char* method, const char* q
     pid_t pid;
     int cgi_input[2];
     int cgi_output[2];
+    char c;
+    int status;
 
     buf[0] = 'A'; buf[1] = '\0';
-    if (strcmp(method, "GET") == 0) {
+    if (strcasecmp(method, "GET") == 0) {
         // read and discard
-        while (numchars > 0 && strcmp(buf, "\n"))
+        while ((numchars > 0) && strcmp("\n", buf))  
             numchars = get_line(client, buf, sizeof(buf));
-    } else {
+    } else if (strcasecmp(method, "POST") == 0) /*POST*/ {
         numchars = get_line(client, buf, sizeof(buf));
-        while (numchars > 0 && strcmp(buf, "\n"))
+        while ((numchars > 0) && strcmp("\n", buf))
+        {
             buf[15] = '\0';
-        if (strcmp(buf, "Content-Length:") == 0) {
-            content_length = atoi(buf+16);
+            if (strcasecmp(buf, "Content-Length:") == 0)
+                content_length = atoi(&(buf[16])); // get the value of Content-Length
+            numchars = get_line(client, buf, sizeof(buf));
         }
-        numchars = get_line(client, buf, sizeof(buf));
-        if (content_length == 0) {
+        if (content_length == -1) {
             bad_request(client);
             return;
         }
+    } else {
     }
     
+    printf("send HTTP response header");
     sprintf(buf, "HTTP/1.1 200 OK\r\n");
     send(client, buf, strlen(buf), 0);
 
@@ -268,7 +281,52 @@ void execute_cgi(int client, const char* path, const char* method, const char* q
         return;
     }
 
-    // TODO: child and parent process
+    printf("debug: begin fork");
+    if (pid == 0) { 
+        char method_env[255];
+        char query_string_env[255];
+        char content_length_env[255];
+
+        // child process, execute cgi script
+        dup2(cgi_output[1], STDOUT);
+        dup2(cgi_input[0], STDIN);
+        close(cgi_output[0]);
+        close(cgi_input[1]);
+
+        sprintf(method_env, "REQUEST_METHOD=%s", method);
+        putenv(method_env);
+        if (strcasecmp(method, "GET") == 0) {
+            sprintf(query_string_env, "QUERY_STRING=%s", query_string);
+            putenv(query_string_env);
+        } else {
+            sprintf(content_length_env, "CONTENT_LENGTH=%d", content_length);
+            putenv(content_length_env);
+        }
+        printf("debug: begin execl");
+        execl(path, NULL);
+        exit(0);
+    } else { 
+        // parent process
+        close(cgi_input[0]);
+        close(cgi_output[1]);
+
+        printf("debug: begin read POST");
+        if (strcasecmp(method, "POST") == 0) {
+            for (int i = 0; i < content_length; i++) {
+                recv(client, &c, 1, 0);
+                write(cgi_input[1], &c, 1);
+            }
+        }
+
+        printf("debug: begin send POST response");
+        // read cgi execute output
+        while (read(cgi_output[0], &c, 1) > 0)
+            send(client, &c, 1, 0);
+
+        close(cgi_output[0]);
+        close(cgi_input[1]);
+        waitpid(pid, &status, 0);
+    }
 }
 
 // present a static file
