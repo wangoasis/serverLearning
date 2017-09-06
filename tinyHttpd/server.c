@@ -23,6 +23,8 @@ void execute_cgi(int, const char*, const char*, const char*);
 void serve_file(int, const char*);
 void send_response_headers(int);
 void send_response_body(int, FILE*);
+void bad_request(int);
+void cannot_execute_cgi(int);
 
 int main(int argc, char* argv[]) {
     if (argc == 1) {
@@ -224,7 +226,49 @@ void not_found(int client) {
 }
 
 void execute_cgi(int client, const char* path, const char* method, const char* query_string) {
-    // TODO
+    char buf[BUF_SIZE];
+    int numchars = 1;
+    int content_length = -1;
+    pid_t pid;
+    int cgi_input[2];
+    int cgi_output[2];
+
+    buf[0] = 'A'; buf[1] = '\0';
+    if (strcmp(method, "GET") == 0) {
+        // read and discard
+        while (numchars > 0 && strcmp(buf, "\n"))
+            numchars = get_line(client, buf, sizeof(buf));
+    } else {
+        numchars = get_line(client, buf, sizeof(buf));
+        while (numchars > 0 && strcmp(buf, "\n"))
+            buf[15] = '\0';
+        if (strcmp(buf, "Content-Length:") == 0) {
+            content_length = atoi(buf+16);
+        }
+        numchars = get_line(client, buf, sizeof(buf));
+        if (content_length == 0) {
+            bad_request(client);
+            return;
+        }
+    }
+    
+    sprintf(buf, "HTTP/1.1 200 OK\r\n");
+    send(client, buf, strlen(buf), 0);
+
+    if (pipe(cgi_input) == -1) {
+        cannot_execute_cgi(client);
+        return;
+    }
+    if (pipe(cgi_output) == -1) {
+        cannot_execute_cgi(client);
+        return;
+    }
+    if ((pid = fork()) < 0) {
+        cannot_execute_cgi(client);
+        return;
+    }
+
+    // TODO: child and parent process
 }
 
 // present a static file
@@ -269,5 +313,43 @@ void send_response_headers(int client) {
     sprintf(buf, "Content-Type: text/html\r\n");
     send(client, buf, strlen(buf), 0);
     sprintf(buf, "\r\n");
+    send(client, buf, strlen(buf), 0);
+}
+
+void bad_request(int client) {
+    char buf[BUF_SIZE];
+
+    sprintf(buf, "HTTP/1.0 400 Bad Request\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "SERVER: %s\r\n", SERVER_NAME);
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "Content-Type: text/html\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "<HTML><TITLE>Bad Request</TITLE>\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "<BODY><P>400 BAD REQUEST\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "</BODY></HTML>\r\n");
+    send(client, buf, strlen(buf), 0);
+}
+
+void cannot_execute_cgi(int client) {
+    char buf[BUF_SIZE];
+
+    sprintf(buf, "HTTP/1.0 500 Internal Server Error\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "SERVER: %s\r\n", SERVER_NAME);
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "Content-Type: text/html\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "<HTML><TITLE>Internal Server Error</TITLE>\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "<BODY><P>500 Internal Server Error\r\n");
+    send(client, buf, strlen(buf), 0);
+    sprintf(buf, "</BODY></HTML>\r\n");
     send(client, buf, strlen(buf), 0);
 }
