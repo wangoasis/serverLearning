@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <ctype.h>
 
 #define ISspace(x) isspace((int)x)
@@ -125,7 +126,6 @@ void* accept_request(void* arg) {
     }
     method[j] = '\0';
 
-    printf("method=%s", method);
 
     if (strcasecmp(method, "POST") == 0) {
         cgi = 1;
@@ -140,7 +140,6 @@ void* accept_request(void* arg) {
         url[j++] = buf[i++];
     }
     url[j] = '\0';
-    printf("url=%s", url);
 
     // get query_string
     if (strcasecmp(method, "GET") == 0) {
@@ -155,7 +154,6 @@ void* accept_request(void* arg) {
     }
 
     sprintf(path, "htdocs%s", url);
-    printf("path=%s", path);
 
     // if path is a directory, the set dafault page: index.html
     if (path[strlen(path)-1] == '/')
@@ -168,12 +166,10 @@ void* accept_request(void* arg) {
         // page not exist
         not_found(client);
     } else {
-        printf("test cgi file mode");
         if ((st.st_mode & S_IFMT) == S_IFDIR)
             strcat(path, "/index.html");
         if ((st.st_mode & S_IXUSR) || (st.st_mode & S_IXGRP) || (st.st_mode & S_IXOTH)) 
             cgi = 1;
-        printf("cgi file can execute");
         if (cgi > 0) {
             execute_cgi(client, path, method, query_string);
         } else {
@@ -242,6 +238,7 @@ void execute_cgi(int client, const char* path, const char* method, const char* q
     int cgi_output[2];
     char c;
     int status;
+    int i;
 
     buf[0] = 'A'; buf[1] = '\0';
     if (strcasecmp(method, "GET") == 0) {
@@ -264,7 +261,6 @@ void execute_cgi(int client, const char* path, const char* method, const char* q
     } else {
     }
     
-    printf("send HTTP response header");
     sprintf(buf, "HTTP/1.1 200 OK\r\n");
     send(client, buf, strlen(buf), 0);
 
@@ -281,7 +277,6 @@ void execute_cgi(int client, const char* path, const char* method, const char* q
         return;
     }
 
-    printf("debug: begin fork");
     if (pid == 0) { 
         char method_env[255];
         char query_string_env[255];
@@ -302,23 +297,20 @@ void execute_cgi(int client, const char* path, const char* method, const char* q
             sprintf(content_length_env, "CONTENT_LENGTH=%d", content_length);
             putenv(content_length_env);
         }
-        printf("debug: begin execl");
-        execl(path, NULL);
+        execl(path, path, NULL);
         exit(0);
     } else { 
         // parent process
         close(cgi_input[0]);
         close(cgi_output[1]);
 
-        printf("debug: begin read POST");
         if (strcasecmp(method, "POST") == 0) {
-            for (int i = 0; i < content_length; i++) {
+            for (i = 0; i < content_length; i++) {
                 recv(client, &c, 1, 0);
                 write(cgi_input[1], &c, 1);
             }
         }
 
-        printf("debug: begin send POST response");
         // read cgi execute output
         while (read(cgi_output[0], &c, 1) > 0)
             send(client, &c, 1, 0);
