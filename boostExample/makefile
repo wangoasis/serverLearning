@@ -1,15 +1,13 @@
 CC=g++
 LIBS=/usr/local/boost_1_65_0
 CFLAGS=-g -W -Wall -std=c++11
-OBJS=/usr/local/boost_1_65_0/stage/lib/libboost_system.a
+DEPS=/usr/local/boost_1_65_0/stage/lib/libboost_system.a
+OBJS=server.o client.o sync_timer.o
 
-all: server client
+all: $(OBJS)
 
-server: server.cpp
-	$(CC) $(CFLAGS) -I $(LIBS) -o $@ $< $(OBJS)
+%.o: %.cpp $(DEPS)
+	$(CC) $(CFLAGS) -I $(LIBS) -o $@ $< $(DEPS)
 
-client: client.cpp
-	$(CC) $(CFLAGS) -I $(LIBS) -o $@ $< $(OBJS)
-	
 clean:
-	rm server client
+	rm $(OBJS)
